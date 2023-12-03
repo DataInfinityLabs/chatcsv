@@ -1,11 +1,9 @@
 import gradio as gr
-from langchain.document_loaders import CSVLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chains import ConversationalRetrievalChain
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.llms import HuggingFaceHub
+
+from langchain.agents.agent_types import AgentType
+from langchain.chat_models import ChatOpenAI
+from langchain.llms import OpenAI
+from langchain.agents import create_csv_agent
 import os
 
 
@@ -13,30 +11,21 @@ def loading_csv():
     return "Loading..."
 
 
-def csv_changes(pdf_doc, repo_id, api_token):
-    os.environ["HUGGINGFACEHUB_API_TOKEN"] = api_token
+def csv_changes(csv_doc, api_token):
+    os.environ["OPENAI_API_KEY"] = api_token
 
     if api_token == "":
         return "API Key required!"
 
-    loader = CSVLoader(pdf_doc)
-    # Split the PDF into Pages
-    data = loader.load()
+    global agent
 
-    embeddings = HuggingFaceEmbeddings()
-
-    global db
-    global chain
-
-    db = FAISS.from_documents(data, embeddings)
-    llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": 1, "max_length": 1000000}
+    agent = create_csv_agent(
+        OpenAI(temperature=0,
+               ),
+        csv_doc,
+        verbose=True,
+        agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     )
-    chain = load_qa_chain(llm, chain_type="stuff")
-    # chain = ConversationalRetrievalChain.from_llm(
-    #     llm=llm,
-    #     retriever=db.as_retriever(),
-    # )
 
     return "Ready"
 
@@ -53,8 +42,7 @@ def bot(history):
 
 
 def infer(question):
-    docs = db.docstore._dict.values()
-    result = chain.run(input_documents=docs, question=question)
+    result = agent.run(question)
     return result
 
 
@@ -64,9 +52,9 @@ css = """
 
 title = """
 <div style="text-align: center;max-width: 700px;">
-    <h1>Chat with PDF</h1>
-    <p style="text-align: center;">Upload a .PDF from your computer, click the "Load PDF to LangChain" button, <br />
-    when everything is ready, you can start asking questions about the pdf ;)</p>
+    <h1>Chat with csv</h1>
+    <p style="text-align: center;">Upload a .csv from your computer, click the "Load csv to LangChain" button, <br />
+    when everything is ready, you can start asking questions about the csv ;)</p>
 </div>
 """
 
@@ -75,25 +63,17 @@ with gr.Blocks(css=css) as demo:
         gr.HTML(title)
 
         with gr.Column():
-            pdf_doc = gr.File(label="Load a pdf", file_types=[".csv"], type="filepath")
-            repo_id = gr.Dropdown(
-                label="LLM",
-                choices=[
-                    "google/flan-ul2",
-                    "OpenAssistant/oasst-sft-1-pythia-12b",
-                    "bigscience/bloomz",
-                ],
-                value="google/flan-ul2",
-            )
+            csv_doc = gr.File(label="Load a csv", file_types=[".csv"], type="filepath")
+           
             api_token = gr.Textbox(
-                label="Hugging Face API Token",
-                placeholder="Enter your Hugging Face API Token",
+                label="Open AI API Token",
+                placeholder="Enter your Open AI API Token",
             )
             with gr.Row():
                 langchain_status = gr.Textbox(
                     label="Status", placeholder="", interactive=False
                 )
-                load_pdf = gr.Button("Load pdf to Langchain")
+                load_csv = gr.Button("Load csv to Langchain")
 
         chatbot = gr.Chatbot([], elem_id="chatbot")
         question = gr.Textbox(
@@ -101,15 +81,10 @@ with gr.Blocks(css=css) as demo:
         )
         submit_btn = gr.Button("Send message")
 
-    repo_id.change(
+
+    load_csv.click(
         csv_changes,
-        inputs=[pdf_doc, repo_id, api_token],
-        outputs=[langchain_status],
-        queue=False,
-    )
-    load_pdf.click(
-        csv_changes,
-        inputs=[pdf_doc, repo_id, api_token],
+        inputs=[csv_doc, api_token],
         outputs=[langchain_status],
         queue=False,
     )
